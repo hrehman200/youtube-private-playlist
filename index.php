@@ -1,11 +1,10 @@
 <?php
 
 require_once __DIR__ . '/vendor/autoload.php';
+require_once __DIR__ . '/config.php';
 session_start();
 
-define('CREDENTIALS_PATH', './data/oauth2.json');
-define('SECRET_PATH', './data/google_client_secret.json');
-define('REDIRECT_URL', 'http://localhost/youtube-private-playlist/');
+use Abraham\TwitterOAuth\TwitterOAuth;
 
 function getClient() {
     $client = new Google_Client();
@@ -15,11 +14,12 @@ function getClient() {
     $client->setRedirectUri(REDIRECT_URL);
     $client->addScope(Google_Service_YouTube::YOUTUBE_READONLY);
     $client->setAccessType('offline');
+    $client->setApprovalPrompt('force');
 
     // Load previously authorized credentials from a file.
     $credentialsPath = CREDENTIALS_PATH;
     if (file_exists($credentialsPath)) {
-        $accessToken = file_get_contents($credentialsPath);
+        $accessToken = json_decode(file_get_contents($credentialsPath), true);
     } else {
         // Request authorization from the user.
         $authUrl = $client->createAuthUrl();
@@ -34,7 +34,7 @@ function getClient() {
         if (!file_exists(dirname($credentialsPath))) {
             mkdir(dirname($credentialsPath), 0700, true);
         }
-        file_put_contents($credentialsPath, $accessToken);
+        file_put_contents($credentialsPath, json_encode($accessToken));
         printf("Credentials saved to %s\n", $credentialsPath);
     }
     $client->setAccessToken($accessToken);
@@ -76,7 +76,7 @@ if (!$client->getAccessToken()) {
 }
 
 $playlistItems = $youtube->playlistItems->listPlaylistItems("snippet,contentDetails", array(
-    'playlistId' => 'PLjncHZSg0GNF2dTrf0PknwTYrZWy-USTX',
+    'playlistId' => PLAYLIST_ID,
     'maxResults' => 50,
 ));
 
@@ -84,7 +84,7 @@ while ($playlistItems->nextPageToken) {
     $playlistItems = $youtube->playlistItems->listPlaylistItems(
         "snippet",
         array(
-            "playlistId" => 'PLjncHZSg0GNF2dTrf0PknwTYrZWy-USTX',
+            "playlistId" => PLAYLIST_ID,
             "maxResults" => 50,
             "pageToken" => $playlistItems->nextPageToken
         )
@@ -94,8 +94,33 @@ while ($playlistItems->nextPageToken) {
 if ($playlistItems) {
     $arr = $playlistItems->getItems();
     $item = end($arr);
+    $latest_video_id = $item['snippet']['resourceId']['videoId'];
+    $saved_video_id = file_get_contents(LATEST_VIDEO_PATH);
+
+    if($latest_video_id != $saved_video_id) {
+        echo $item['snippet']['title'] . " " . $latest_video_id . "\n";
+        file_put_contents(LATEST_VIDEO_PATH, $latest_video_id);
+
+
+        $twitter_token = json_decode(file_get_contents(TWITTER_OAUTH_PATH), true);
+        $twitter = new TwitterOAuth(
+            $twitter_settings['consumer_key'],
+            $twitter_settings['consumer_secret'],
+            $twitter_token['oauth_token'],
+            $twitter_token['oauth_token_secret']
+        );
+
+        $status = $twitter->post(
+            "statuses/update", [
+                "status" => "New video uploaded https://www.youtube.com/watch?v=".$latest_video_id
+            ]
+        );
+
+        echo ('Created new twitter status with #' . $status->id . PHP_EOL);
+
+    }
 }
 
-echo $item['snippet']['title'] . " " . $item['snippet']['resourceId']['videoId'] . "\n";
+
 
 ?>
